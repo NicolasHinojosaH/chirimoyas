@@ -27,6 +27,13 @@
   .msg { margin-top:12px; font-weight:600; }
   .msg.err { color:var(--err); }
   .ok { text-align:center; padding:24px 8px; }
+  .lista { margin-top:16px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .lista h2 { margin:0 0 4px; font-size:1.2rem; }
+  .resumen { margin:0 0 8px; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 4px; border-bottom:1px solid var(--line); }
+  th { font-size:.85rem; color:var(--muted); }
+  .num { text-align:right; }
   .hp { position:absolute; left:-9999px; }
   [hidden] { display:none !important; }
 </style>
@@ -56,6 +63,15 @@
     <button type="submit" id="btn">Enviar pedido</button>
     <div class="msg" id="msg" role="status"></div>
   </form>
+
+  <section class="lista" id="lista" hidden>
+    <h2>Inscritos</h2>
+    <p class="resumen" id="resumen"></p>
+    <table>
+      <thead><tr><th>Nombre</th><th>Área</th><th class="num">Kilos</th></tr></thead>
+      <tbody id="filas"></tbody>
+    </table>
+  </section>
 
   <div class="ok" id="ok" hidden>
     <h2>¡Pedido recibido! 🎉</h2>
@@ -115,18 +131,19 @@ $("form").addEventListener("submit", async e => {
   $("btn").disabled = true;
   $("btn").textContent = "Enviando…";
   try {
-    // text/plain evita el preflight CORS de Apps Script
-    const r = await fetch(CONFIG.scriptUrl, {
+    // no-cors: el pedido se guarda, pero la respuesta no se puede leer. En algunos
+    // navegadores la redirección de Apps Script devuelve 404 y daba falso error.
+    await fetch(CONFIG.scriptUrl, {
       method: "POST",
+      mode: "no-cors",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(data)
     });
-    const j = await r.json();
-    if (!j.ok) throw new Error(j.error || "error");
     $("form").hidden = true;
     $("ok").hidden = false;
     $("okTxt").textContent = `Gracias ${data.nombre.split(" ")[0]}, anotamos ${data.kilos} kg. Entrega: ${CONFIG.fechaEntrega}.`;
     f.reset(); $("total").textContent = "";
+    setTimeout(cargarLista, 2500);
   } catch (err) {
     fail("No se pudo enviar. Intenta de nuevo o avísame por WhatsApp.");
   } finally {
@@ -134,6 +151,37 @@ $("form").addEventListener("submit", async e => {
     $("btn").textContent = "Enviar pedido";
   }
 });
+
+// Lista de inscritos (JSONP: evita problemas de CORS con Apps Script)
+function cargarLista() {
+  if (CONFIG.scriptUrl.startsWith("PEGAR")) return;
+  window.__lista = d => {
+    if (!d || !d.ok) return;
+    const filas = $("filas");
+    filas.textContent = "";
+    let total = 0;
+    d.lista.forEach(x => {
+      total += x.k;
+      const tr = document.createElement("tr");
+      [x.n, x.a, String(x.k).replace(".", ",")].forEach((t, i) => {
+        const td = document.createElement("td");
+        td.textContent = t;          // textContent: nunca interpreta HTML
+        if (i === 2) td.className = "num";
+        tr.appendChild(td);
+      });
+      filas.appendChild(tr);
+    });
+    $("resumen").textContent = d.lista.length
+      ? `${d.lista.length} inscritos · ${String(total).replace(".", ",")} kg en total`
+      : "Aún no hay inscritos. ¡Sé la primera persona!";
+    $("lista").hidden = false;
+  };
+  const s = document.createElement("script");
+  s.src = CONFIG.scriptUrl + "?callback=__lista&t=" + Date.now();
+  s.onload = s.onerror = () => s.remove();
+  document.body.appendChild(s);
+}
+cargarLista();
 
 $("otro").addEventListener("click", () => { $("ok").hidden = true; $("form").hidden = false; });
 </script>
