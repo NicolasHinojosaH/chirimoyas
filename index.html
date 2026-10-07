@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedido de chirimoyas</title>
+<style>
+  :root { --bg:#f6f3ea; --card:#fff; --ink:#233; --muted:#667; --accent:#3f7d4e; --line:#d9d4c3; --err:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#17201a; --card:#1f2b22; --ink:#eef2ea; --muted:#a3b0a5; --accent:#7cc38e; --line:#34443a; --err:#ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
+  main { max-width:480px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { margin:0 0 4px; font-size:1.6rem; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .info { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 16px; margin-bottom:16px; }
+  .info p { margin:2px 0; }
+  form { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  label { display:block; font-weight:600; margin:14px 0 4px; }
+  label:first-child { margin-top:0; }
+  input, select { width:100%; padding:12px; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; }
+  input:focus, select:focus { outline:2px solid var(--accent); border-color:transparent; }
+  .total { margin-top:12px; color:var(--muted); min-height:1.5em; }
+  button { width:100%; margin-top:16px; padding:14px; font:inherit; font-weight:700; color:#fff; background:var(--accent); border:0; border-radius:8px; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:wait; }
+  .msg { margin-top:12px; font-weight:600; }
+  .msg.err { color:var(--err); }
+  .ok { text-align:center; padding:24px 8px; }
+  .hp { position:absolute; left:-9999px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🍈 Pedido de chirimoyas</h1>
+  <p class="sub">Anótate y te las llevo hasta tu puesto.</p>
+
+  <div class="info" id="info"></div>
+
+  <form id="form" novalidate>
+    <label for="nombre">Nombre completo</label>
+    <input id="nombre" name="nombre" autocomplete="name" required maxlength="80">
+
+    <label for="area">Área o departamento</label>
+    <input id="area" name="area" required maxlength="80">
+
+    <label for="telefono">Teléfono de contacto</label>
+    <input id="telefono" name="telefono" type="tel" inputmode="tel" autocomplete="tel" required maxlength="20" placeholder="+56 9 1234 5678">
+
+    <label for="kilos">Kilos que quieres encargar</label>
+    <input id="kilos" name="kilos" type="number" inputmode="decimal" min="0.5" max="50" step="0.5" required>
+    <div class="total" id="total"></div>
+
+    <input class="hp" name="web" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <button type="submit" id="btn">Enviar pedido</button>
+    <div class="msg" id="msg" role="status"></div>
+  </form>
+
+  <div class="ok" id="ok" hidden>
+    <h2>¡Pedido recibido! 🎉</h2>
+    <p id="okTxt"></p>
+    <button type="button" id="otro">Hacer otro pedido</button>
+  </div>
+</main>
+
+<script>
+// ====== CONFIGURA AQUÍ ======
+const CONFIG = {
+  // URL de la aplicación web de Apps Script (termina en /exec)
+  scriptUrl: "PEGAR_URL_DE_APPS_SCRIPT_AQUI",
+  precioPorKilo: 0,            // en pesos; 0 = no mostrar precio
+  fechaEntrega: "por definir", // ej: "viernes 17 de octubre"
+  pago: "por definir",         // ej: "efectivo o transferencia al entregar"
+  cierre: ""                   // fecha límite ISO, ej: "2026-10-14T18:00"; "" = sin cierre
+};
+// ============================
+
+const $ = id => document.getElementById(id);
+const clp = n => "$" + Math.round(n).toLocaleString("es-CL");
+
+$("info").innerHTML =
+  `<p><b>Entrega:</b> ${CONFIG.fechaEntrega}</p>` +
+  (CONFIG.precioPorKilo ? `<p><b>Precio:</b> ${clp(CONFIG.precioPorKilo)} por kilo</p>` : "") +
+  `<p><b>Pago:</b> ${CONFIG.pago}</p>`;
+
+if (CONFIG.cierre && new Date() > new Date(CONFIG.cierre)) {
+  $("form").hidden = true;
+  $("info").insertAdjacentHTML("afterend", "<p class='msg err'>Los pedidos para esta ronda ya cerraron.</p>");
+}
+
+$("kilos").addEventListener("input", () => {
+  const k = parseFloat($("kilos").value);
+  $("total").textContent = k > 0 && CONFIG.precioPorKilo ? `Total estimado: ${clp(k * CONFIG.precioPorKilo)}` : "";
+});
+
+function fail(t) { $("msg").className = "msg err"; $("msg").textContent = t; }
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("msg").textContent = "";
+  const f = e.target;
+  const data = {
+    nombre: f.nombre.value.trim(),
+    area: f.area.value.trim(),
+    telefono: f.telefono.value.trim(),
+    kilos: parseFloat(f.kilos.value),
+    web: f.web.value
+  };
+  if (!data.nombre || !data.area) return fail("Completa tu nombre y área.");
+  if (data.telefono.replace(/\D/g, "").length < 8) return fail("Revisa tu teléfono.");
+  if (!(data.kilos >= 0.5 && data.kilos <= 50)) return fail("Los kilos deben estar entre 0,5 y 50.");
+  if (CONFIG.scriptUrl.startsWith("PEGAR")) return fail("Falta configurar la URL del script.");
+
+  $("btn").disabled = true;
+  $("btn").textContent = "Enviando…";
+  try {
+    // text/plain evita el preflight CORS de Apps Script
+    const r = await fetch(CONFIG.scriptUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(data)
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "error");
+    $("form").hidden = true;
+    $("ok").hidden = false;
+    $("okTxt").textContent = `Gracias ${data.nombre.split(" ")[0]}, anotamos ${data.kilos} kg. Entrega: ${CONFIG.fechaEntrega}.`;
+    f.reset(); $("total").textContent = "";
+  } catch (err) {
+    fail("No se pudo enviar. Intenta de nuevo o avísame por WhatsApp.");
+  } finally {
+    $("btn").disabled = false;
+    $("btn").textContent = "Enviar pedido";
+  }
+});
+
+$("otro").addEventListener("click", () => { $("ok").hidden = true; $("form").hidden = false; });
+</script>
+</body>
+</html>
